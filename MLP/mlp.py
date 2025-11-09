@@ -144,6 +144,9 @@ print(y_pred.size()) # (40, 1)
 """
 숫자 판독기 만들기
 """
+import torch
+from torch import nn
+
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.datasets import load_digits
@@ -151,6 +154,10 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import TensorDataset
 from torch.utils.data import DataLoader
+import os
+import math
+import time
+from sklearn.metrics import classification_report, confusion_matrix
 
 # 데이터 로드하기
 digits = load_digits()
@@ -201,4 +208,127 @@ for idx, batch in enumerate(train_loader):
     print(idx, batch)
     print(len(batch[1]))
     break
-# %%
+
+# 학습 및 테스트
+input_dim = 64
+num_classes = 10
+hidden_dim = (128, 64)
+dropout = 0.2
+h1, h2 = hidden_dim
+
+model = nn.Sequential(
+    nn.Linear(input_dim, h1),
+    nn.ReLU(),
+    nn.Dropout(dropout),
+    nn.Linear(h1, h2),
+    nn.ReLU(),
+    nn.Dropout(dropout),
+    nn.Linear(h2, num_classes),
+)
+
+optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
+
+best_val_loss = math.inf
+best_val_acc = -1.0
+epochs_no_improve = 0
+
+# checkpoint_path = "model.ckpt"
+early_stop_patience = 5
+
+train_losses, train_accs = [], []
+valid_losses, valid_accs = [], []
+
+for epoch in range(1, 201):
+    # 학습
+    model.train()
+    train_running_loss = 0.0
+    train_correct = 0
+    train_total = 0
+    for xb, yb in train_loader:
+        optimizer.zero_grad() # 기울기 초기화
+        logits = model(xb) # 추정값 계산
+        loss = torch.nn.functional.cross_entropy(logits, yb) # loss 계산
+        loss.backward() # 기울기 계산
+        optimizer.step() # optimizer 업데이트
+        
+        train_running_loss += loss.item() * xb.size(0)
+        preds = logits.argmax(dim=1)
+        train_correct += (preds == yb).sum().item()
+        train_total += yb.size(0)
+    
+    train_loss = train_running_loss / train_total
+    train_acc = train_correct / train_total
+    
+    train_losses.append(train_loss)
+    train_accs.append(train_acc)
+        
+    # 테스트
+    model.eval()
+    valid_running_loss = 0.0
+    valid_correct = 0
+    valid_total = 0
+
+    with torch.no_grad(): # 미분 그래프 생성 X
+        for xb, yb in valid_loader:
+            logits = model(xb)
+            loss = torch.nn.functional.cross_entropy(logits, yb)
+            
+            valid_running_loss += loss.item() * xb.size(0)
+            preds = logits.argmax(dim=1)
+            valid_correct += (preds == yb).sum().item()
+            valid_total += yb.size(0)
+            
+        val_loss = valid_running_loss / valid_total
+        val_acc = valid_correct / valid_total
+        
+        valid_losses.append(val_loss)
+        valid_accs.append(val_acc)
+    
+    improved = (val_loss < best_val_loss) or (val_acc > best_val_acc)
+    if improved:
+        best_val_loss = min(val_loss, best_val_loss)
+        best_val_acc = max(val_acc, best_val_acc)
+        epochs_no_improve = 0
+    else:
+        epochs_no_improve += 1
+    
+    if epochs_no_improve >= early_stop_patience: # 연속적으로 개선이 안된 횟수가 early_stop_patience 이상이면 stop
+        print(f"Early stopping at epoch {epoch} (no improve {early_stop_patience})")
+        break
+
+
+model.eval()
+test_running_loss = 0.0
+test_correct = 0
+test_total = 0
+all_preds = []
+all_targets = []
+
+with torch.no_grad():
+    for xb, yb in test_loader:
+        logits = model(xb)
+        loss = nn.functional.cross_entropy(logits, yb)
+        
+        test_running_loss += loss.item() * xb.size(0)
+        test_preds = logits.argmax(dim=1)
+        test_correct += (test_preds == yb).sum().item()
+        test_total += yb.size(0)
+        
+        all_preds.append(test_preds.cpu())
+        all_targets.append(yb.cpu())
+
+test_loss = test_running_loss / test_total
+test_acc = test_correct / test_total
+y_pred = torch.cat(all_preds).numpy()
+y_true = torch.cat(all_targets).numpy()
+
+print("\n==== Test Result ====")
+print(f"Test loss: {test_loss:.4f}")
+print(f"Test acc : {test_acc*100:.2f}%")
+
+# 분류 리포트 / 혼동행렬
+print("\nClassification report:")
+print(classification_report(y_true, y_pred, digits=4))
+
+print("Confusion matrix:")
+print(confusion_matrix(y_true, y_pred))
