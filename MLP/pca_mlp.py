@@ -38,10 +38,10 @@ print("PCA 축소 차원: ", X_train_pca.shape[1])
 
 # Pytorch tensor로 변환
 X_train_tensor = torch.from_numpy(X_train_pca).float()
-y_train_tensor = torch.from_numpy(y_train).float()
+y_train_tensor = torch.from_numpy(y_train).float().unsqueeze(1)
 
 X_test_tensor = torch.from_numpy(X_test_pca).float()
-y_test_tensor = torch.from_numpy(y_test).float()
+y_test_tensor = torch.from_numpy(y_test).float().unsqueeze(1)
 
 # Dataset과 DataLoader
 train_ds = TensorDataset(X_train_tensor, y_train_tensor)
@@ -68,6 +68,7 @@ for epoch in range(1, epochs+1):
         total_loss += loss.item() * xb.size(0)
     
     train_loss = total_loss / len(train_loader.dataset)
+    print(f"[Epoch:{epoch}] loss: {train_loss:.4f}")
 
 # 테스트 평가
 model.eval()
@@ -91,10 +92,10 @@ Autoencoder 활용 8 -> 5 -> 3 -> 5 -> 8
 """
 # tensor 변환
 X_train_tensor_ae = torch.from_numpy(X_train_scaled).float()
-y_train_tensor_ae = torch.from_numpy(y_train).float()
+y_train_tensor_ae = torch.from_numpy(y_train).float().unsqueeze(1)
 
 X_test_tensor_ae = torch.from_numpy(X_test_scaled).float()
-y_test_tensor_ae = torch.from_numpy(y_test).float()
+y_test_tensor_ae = torch.from_numpy(y_test).float().unsqueeze(1)
 
 # Dataset과 DataLoader
 train_ds_ae = TensorDataset(X_train_tensor_ae, y_train_tensor_ae)
@@ -133,7 +134,12 @@ for epoch in range(1, epochs + 1):
         ae_optimizer.step()
         total_loss += loss.item() * xb.size(0)
     train_loss = total_loss / len(train_loader_ae.dataset)
+    print(f"[Epoch:{epoch}] loss: {train_loss:.4f}")
 
+#%%
+"""
+Autoencoder latent vector 활용
+"""
 # latent vector 추출 및 회귀용 데이터셋 생성
 encoder.eval()
 decoder.eval()
@@ -164,6 +170,7 @@ for epoch in range(1, epochs + 1):
         total_loss += loss.item() * xb.size(0)
     
     train_loss = total_loss / len(train_latent_loader.dataset)
+    print(f"[Epoch:{epoch}] loss: {train_loss:.4f}")
 
 # 테스트 평가
 latent_reg_model.eval()
@@ -239,5 +246,3 @@ plt.title('Actual vs Predictions (First 100 samples)')
 plt.legend()
 plt.grid(True)
 plt.show()
-
-# %%
