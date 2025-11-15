@@ -20,6 +20,38 @@ import torch.nn.functional as F
 from torch.utils.data import TensorDataset, DataLoader
 from tqdm.auto import tqdm
 from sklearn.metrics import f1_score
+import subprocess
+import sys
+
+#%%
+try:
+    import wandb
+except:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "wandb"])
+    with open("./wandb_api.txt", "r") as f:
+        key = f.readline()
+    subprocess.run(["wandb", "login"], input=key[0], encoding='utf-8')
+    import wandb
+
+project = "credit_card_anomaly"
+entity = "huiwon"
+
+run = wandb.init(
+    project=project,
+    entity=entity,
+    tags=["basecode"]
+)
+
+config = {
+    'epochs': 4,
+    'lr': 1e-2,
+    'bs': 128, # 기본 배치사이즈 (64, 128, 256, 512)
+    'seed': 41,
+    'similarity': 'cossim'
+}
+
+config['cuda'] = torch.cuda.is_available()
+wandb.config.update(config)
 
 device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
@@ -57,12 +89,12 @@ val_df = val_df.drop(columns=['ID'])
 
 train_dataset = torch.from_numpy(train_df.values)
 train_ds = TensorDataset(train_dataset)
-train_loader = DataLoader(train_ds, batch_size=BS, shuffle=True, num_workers=0)
+train_loader = DataLoader(train_ds, batch_size=BS, shuffle=True)
 
 y_val_dataset = torch.from_numpy(val_df['Class'].values)
 X_val_dataset = torch.from_numpy(val_df.drop(columns=['Class']).values)
 val_ds = TensorDataset(X_val_dataset, y_val_dataset)
-val_loader = DataLoader(val_ds, batch_size=BS, shuffle=False, num_workers=0)
+val_loader = DataLoader(val_ds, batch_size=BS, shuffle=False)
 
 #%%
 """
@@ -120,7 +152,8 @@ for epoch in range(EPOCHS):
 
         train_loss.append(loss.item())
     
-    cos = nn.CosineSimilarity(dim=1, eps=1e-6)
+    if config['similarity'] == 'cossim':
+        cos = nn.CosineSimilarity(dim=1, eps=1e-6)
     encoder.eval()
     decoder.eval()
     pred = []
@@ -139,6 +172,8 @@ for epoch in range(EPOCHS):
     score = f1_score(true, pred, average='macro') # "macro": 모든 클래스의 F1 score를 똑같이 평균
     print(f'Epoch: [{epoch}] Train loss:[{np.mean(train_loss)}] Val Score:[{score}]')
 
+    wandb.log({'train_loss': np.mean(train_loss)})
+    
     if scheduler is not None:
         scheduler.step(score) # 학습률 변경할지 판단하기 위해 score 값 전달
     
@@ -205,3 +240,33 @@ with torch.no_grad():
 submit = pd.read_csv('../MLP/data/credit/sample_submission.csv')
 submit['Class'] = pred
 submit.to_csv('../MLP/result/credit/submit_autoencoder.csv', index=False)
+
+#%%
+# wandb에 모델 저장하기
+artifact = wandb.Artifact(
+    f'model1',
+    type='model',
+    metadata=config
+)
+artifact.add_file("./model/credit/best_model.pth")
+wandb.log_artifact(artifact)
+#%%
+# wandb에서 모델 불러오기
+artifact = wandb.use_artifact(f'{entity}/{project}/model1:v0', type='model')
+artifact.metadata.items() # 데이터(config) 불러오기
+model_dir = artifact.download() # wandb가 저장해놓은 로컬 경로
+#%%
+# model_name = sorted([x for x in os.listdir(model_dir) if x.endswith('pth')])
+model_name = [x for x in os.listdir(model_dir) if x.endswith('pth')][0]
+if config['cuda']:
+    checkpoint = torch.load(f'{model_dir}/{model_name}')
+else:
+    checkpoint = torch.load(f'{model_dir}/{model_name}', map_location='cpu')
+encoder.load_state_dict(checkpoint['encoder_state_dict']) # encoder 모델에 적용
+decoder.load_state_dict(checkpoint['decoder_state_dict']) # decoder 모델에 적용
+    
+#%%
+# wandb config 업데이트 하고 끝내기
+wandb.config.update(config, allow_val_change=True)
+wandb.run.finish()
+# %%

@@ -177,3 +177,11 @@ pyrightconfig.json
 .idea/
 
 MLP/data/
+
+wandb_api.txt
+
+artifacts
+
+model
+
+wandb
